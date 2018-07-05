@@ -1,0 +1,329 @@
+---
+title: "Loot Drop Case Study"
+author: "Jason Laso"
+date: "June 30, 2018"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    toc: yes
+    toc_depth: 4
+---
+***
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+require(dplyr)
+require(tidyr)
+require(ggplot2)
+require(ggridges)
+require(scales)
+require(readxl)
+require(gridExtra)
+require(grid)
+require(prettydoc)
+
+```
+
+```{r load data, include=FALSE}
+
+#Set the working directory folder
+setwd("C://Users//Jason//Downloads")
+
+#Read game play data
+loot.data <-read_excel("LootDrops_RecruitingTest_Data.xlsx", sheet = "data")
+
+#Convert strings to factors for all columns except date, time, and coin count
+loot.data[,3:7] = lapply( loot.data[,3:7], factor)
+
+#Read in the expected odds tables for regular drops and scavenger drops
+reg.drop.odds = read_excel("LootDrops_RecruitingTest_Data.xlsx", sheet = "loot chance table", range="B2:D11")
+scav.drop.odds = read_excel("LootDrops_RecruitingTest_Data.xlsx", sheet = "loot chance table", range="F2:H11")
+
+```
+
+```{r subtype data prep, include=FALSE}
+ 
+#To calculate the frequency of each subtype and item, I found it easiest to just filter by each subtype seperately, calculate the frequencies by the different items in each subtype, and then combine them back into one data frame. This one is for the regular drop and then the second table is for the scav drop.
+subtype.freq = loot.data %>%
+  filter(subtype=="RegularDrop") %>%
+  group_by(subtype, ItemWorth) %>%
+  summarize(n = n()  ) %>%
+  arrange(subtype, ItemWorth) %>% 
+  mutate(freq = round(n/sum(n),4))
+
+subtype.freq2 = loot.data %>%
+  filter(subtype=="ScavengerDrop") %>%
+  group_by(subtype, ItemWorth) %>%
+  summarize(n = n()  ) %>%
+  arrange(subtype, ItemWorth) %>%
+  mutate(freq = round(n/sum(n),4))
+
+#These commands append the expected odds onto each data frame
+subtype.freq[, "exp.freq"] = reg.drop.odds[,3]
+subtype.freq2[, "exp.freq"] = scav.drop.odds[,3]  
+
+#Now combining the two subtype frequency tables back into one
+subtype.freq = rbind(subtype.freq, subtype.freq2)
+
+#Creating a variable for the difference in observed and expected frequency for each type of loot drop by subtype
+subtype.freq$diff = round(subtype.freq$freq - subtype.freq$exp.freq,4)
+
+```
+
+# Regular Drops vs. Scavenger Drops
+
+### Distribution on Drop Frequencies
+When analyzing the frequency of each of the nine types of item values, it does appear as if the regular drops are occurring more often for lower-valued items and the scavenger drops are outperforming on middle-valued items (as would be expected). However at least visually, the differences do not appear to be as stark as the cost of the two drops would suggest. The premium drops are adding some value to its users, but it does not look like it's a major one. Furthermore, the regular drops are actually slightly outperforming the scavenger drops on all three of the highest value items (albeit with relatively small samples compared to the other more frequently occurring items). 
+
+```{r Reg vs Scav Distribution Plot, echo=FALSE}
+
+#Barplot of the frequencies of the 2 subtypes in the sample of players side-by-side
+ggplot(subtype.freq, aes(x=ItemWorth, y=freq, fill=subtype)) + 
+  geom_bar(stat="identity",position=position_dodge()) +
+  scale_x_discrete(labels = reg.drop.odds$`Item Class`) +
+  scale_y_continuous(breaks = seq(0,.4,.025)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10))+
+  labs(title = "Distribution of Observed Drop Frequencies", y="Frequency")
+```
+
+### Expected Frequencies vs. Observed Frequencies for Drop Types
+
+The difference really stands out when looking at the expected frequencies of each item versus their observed frequency in the game. Generally speaking, the scavenger items appear to be occurring close to expectation across all nine items. However, there is clearly a disproportionate amount of rare and ultra items occurring on regular drops, which are coming at the expense of fewer of the lower priced common and uncommon items.
+
+```{r Drop Expectation Plot, echo=FALSE}
+
+#Barplot of the difference in frequency from expectation for each subtype
+ggplot(subtype.freq, aes(x=ItemWorth, y=diff, fill=ItemWorth)) + 
+  geom_bar(stat="identity")  +
+  facet_grid(subtype~.) + 
+  geom_hline(yintercept = 0, linetype = "dashed") +
+    scale_x_discrete(labels = reg.drop.odds$`Item Class`) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10)) +
+  scale_y_continuous(breaks = seq(-.1, .1,.04)) +
+  labs(title = "Low and Mid-Valued Regular Drops are Disproportionate to Expectation", y="Difference in Observed Frequency") +
+  theme(legend.position="none")  +
+  geom_text(aes(x=rep(1:9,2), y=diff-.01, label=paste(diff*100,"%") ), hjust=0.5, fontface="bold", 
+                   size=3, color = "black")
+```
+
+To actually quantify this, we can see that the 1,000 and 2,500 valued regular drops are occurring at 5.76% and 22.33% respectively, which are 11.9% and 6.5% under their respective expectations. The fewer number of occurrences for these lower-valued items are very clearly going towards the 10,000 and 25,000 valued regular drops, which are performing 10.5% and 8.3% over their respective expectations.
+
+```{r big drop differences data prep, echo=FALSE}
+#Filtering only the item values with differences of more than 1 percent
+big_differences = subtype.freq %>%
+  filter(subtype=="RegularDrop", abs(diff)>.01)
+
+colnames(big_differences) = c("Drop Type", "Item Worth", "n", "Frequency", "Expected Frequency", "Difference")
+```
+
+```{r Reg Drop Disproportion Grid Table, echo=FALSE}
+#Creates a grid table for report
+grid.table( big_differences)
+```
+
+### Conclusion
+Ultimately it seems not as if there are any internal issues with the scavenger drops, but rather that they just look like they're not of value to the players because they aren't that much more likely to produce mid-valued items than the regular drops. On one hand, the players' complaints are invalid because the scavenger drops are performing according to their expected frequencies (which were designed to increase their likelihood of better drops). On the other hand, the game is dropping too many 10,000 and 25,000 items on the regular drops, which is causing the scavenger drops to seem like a poor value by comparison (why purchase the upgrade if the free items are helping them progress at a similar pace?). In that sense, the players' complaints are valid, but they are directed at the wrong facet of the game. The problem appears to be with the regular drops, not the scavenger drops.
+
+***
+
+# Are Loot Drops Essential to Game Play?
+
+### Total Drops Performed by Users in Sample
+In total, there were over 142,000 unique users in the sample. The users were grouped into segments based on their total number of item drops (both regular and scavenger) during the three day period. The distribution is charted below. 
+
+As we can see, the vast majority of users (96.9% to be exact) performed 1-3 drops in total. Another 2.7% of users performed exactly 4 drops. That means that only 0.4% (or approximately 1 out of every 250 users) performed more than 4 drops over the sample. So it stands within reason that achieving more than 4 loot drops is either some sort of a pain point in the game's progression or is an indication that the drops are not actually all that useful because players are just willingly not taking them.
+
+```{r User Transaction Data Prep, echo=FALSE}
+
+#Count of each users total drops by drop type
+user.transactions = 
+  loot.data %>%
+  group_by(deviceid, subtype) %>%
+  summarize(n = n()) %>%
+  arrange(desc(n)) %>%
+  group_by(deviceid) %>%
+  mutate(total.drops = sum(n)) %>%
+  ungroup() %>%
+  filter(subtype == "RegularDrop") %>%
+  mutate(regular.drops = n, scav.drops = total.drops - regular.drops) %>%
+  select(-n, -subtype)
+
+
+#Conditionally groups the number of drops by users into segments  
+user.transactions$segment = 
+  ifelse(user.transactions$total.drops ==1, "1",
+         ifelse(user.transactions$total.drops ==2, "2",
+                ifelse(user.transactions$total.drops ==3, "3",
+                       ifelse(user.transactions$total.drops == 4, "4",
+                              ifelse(user.transactions$total.drops <= 10, "5-10",
+                                     ifelse(user.transactions$total.drops > 10 & user.transactions$total.drops <=20, "11-20",
+                                            ifelse(user.transactions$total.drops > 20 & user.transactions$total.drops <=50, "21-50",
+                                                   ifelse(user.transactions$total.drops > 50 & user.transactions$total.drops <=100, "51-100",
+                                                          ifelse(user.transactions$total.drops > 100 & user.transactions$total.drops <=1000, "101-1000", ">1000"
+                                                                                    ))))))))
+)
+
+#Convert segments into a factor
+user.transactions$segment = as.factor(user.transactions$segment)
+
+#Re-order the segment factor to be numerical instead of the default alphabetical
+user.transactions$segment = factor(user.transactions$segment,levels = c("1","2","3","4","5-10","11-20","21-50","51-100", "101-1000", ">1000"))
+
+#Create a table of the counts of each segment for use as text labels on the histogram
+segment.counts = user.transactions %>%
+  group_by(segment) %>%
+  summarize(n = n()) 
+```
+
+```{r User Total Drops Plot,echo=FALSE}
+#Histogram of the total drops by each segment
+ggplot(user.transactions, aes(x=segment, fill = segment) ) + 
+  geom_bar(stat="count") +
+  geom_text(data=segment.counts, aes(x=segment, y=n, label=n), vjust=0, hjust=0.5, 
+                   size=4, color = "black") +
+    labs(title = "Total Drops by Individual Users") +
+   theme(legend.position="none") +
+  scale_y_continuous(breaks = seq(0,60000, 10000))
+```
+
+### The Rational Game Assumption (RGA)
+In determining if the loot drops are useful for game play, we would have to assume what I am calling "The Rational Game Assumption" (RGA for short). Logically speaking, if we were to assume that the drops are essential to a player's progress through the game, then we would also assume that players with fewer numbers of total drops would stand to gain the most from a singular loot drop. The reason being that we would assume a positive correlation between total drops taken throughout the game with total coins collected. Under the RGA, players with fewer numbers of drops taken would typically have smaller coin balances than players who had taken many drops, most likely because they are just not as far along in the game. Therefore, players with fewer drops taken would be more prone to variation in their coin balance from a single loot drop.
+
+The percentage change of every loot drop recorded against the players' coin balances at the time of the drop were calculated. This was then plotted against the same player segments created earlier based on their total drops taken throughout the sample. When we look at the density function of each loot drop's percentage increase to a user's coin balance, we see there are extremely similar functions for all user groups. Players with four or fewer total drops are generally gaining about the same from a single loot drop as players with dozens and even hundreds of total loot drops. It seems that regardless of how many drops a player has taken throughout the game, each successive loot drop is usually only adding between 0 - 5% to that player's coin balance. This would be a violation of the RGA that the players with fewer drops would have smaller coin balances, which would be one indicator that the loot drop function may not be too important to players.
+
+```{r Drop Increase to Coin Balance JoyPlot, echo=FALSE, message=FALSE}
+#Join original dataset on individual user information on number of drops
+loot.data2 = loot.data %>% 
+  left_join(user.transactions, by="deviceid" )  %>%
+  #Calulcate the percentage increase of each transaction on the user's coin bank
+  mutate(drop.incr = round(as.numeric(as.character(ItemWorth))  /TotalCoins, 3) ) %>%
+  #filter the transactions only positive coin counts
+  filter(TotalCoins >= 0, !(segment %in% (NA)))
+
+#JoyPlot for Dist of Coin Balances at time of each drop, broken down by segment
+ggplot(loot.data2, aes(x=drop.incr, y=segment, fill=segment)) + 
+  geom_density_ridges(rel_min_height = .05, scale=.9) +
+  scale_x_continuous(breaks = seq(0,.2,.02)) +
+   coord_cartesian(xlim=c(0,.2)) +
+     theme(legend.position="none") +
+  labs(title = "Distribution of Increase to Coin Balances", y = "Total Drops Taken", x="Percentage Increase on Drop")
+
+
+
+```
+
+One way to look at seeing if the percentage increases on drops invalidating the RGA is true would be to look at the actual coin balances of the players at the time of their drop transactions. The following graph is a box plot of the coin balance of the player at the time of each loot drop recorded (regardless of size of the drop or type), broken down by the player segments. Under the RGA where we assume that the loot drops are important to the player's progression in their coin balance throughout the game, this graph should generally be sloping upwards (i.e. more loot drops taken throughout the game equating to higher coin balances later in the game). 
+
+However, notice that the chart shows that there's almost no pattern with the coin balances at each segment whatsoever. The distribution starts to slope upward from users with 1 total drop to 2 total drops to 3, but then for no real reason comes back down for users with 4 drops and continues sloping down to the segments with users who have taken 5-10 and 11-20 total drops. The only segment that seemingly shows any type of discernible pattern of total drops meaning higher coin balances are those in the 101-1000 drop group, by basis of its higher median coin balance and larger upper bound on its bar. However, more than half the users in that segment (those displayed in the box under the median bar) are still making loot drops with the same coin balances as users in the 1 - 3 loot drop segments. So it's difficult to even call anything in this segment a pattern demonstrating that higher coin balances correlating to more total loot drops taken. Instead it seems that players are collecting coins at similar rates regardless of how many drops they have taken prior.
+
+
+```{r Coin Balance at Time of Drop BoxPlot, echo=FALSE}
+
+ggplot(loot.data2, aes(x=segment, y = TotalCoins, fill = segment)) + 
+  geom_boxplot() +
+  coord_cartesian(ylim=c(0,2000000)) +
+  labs(x="Total Drops", y="Total Coins", title="Distribution of Coin Balances at Time of Loot Drop per Segment")+
+  theme(legend.position="none") +
+  scale_y_continuous(breaks = seq(0,2000000, 250000))
+```
+
+### Conclusion
+There was no pattern found in this data that suggests that the RGA is validated. In other words, the loot drops do not in any way appear to be essential towards game progression. Most of the time the players taking loot drops are only adding less than 5 percent to their coin balance per drop taken. These small gains do not seem to entice players enough to want to take more drops, as the vast majority of all players have taken 1 - 3 total drops in the game yet are still achieving median coin balances akin to players who have taken up to 100 total drops. This indicates that players are seemingly able to find enough coins throughout the game to where the loot drops, even just the regular ones, don't seem as important. 
+
+***
+
+#Data Quality Concerns
+
+There were a few small data quality concerns. By-and-large, the data quality was pretty good. Of the 284,135 observations, only `r nrow(loot.data %>% filter(is.na(deviceid))) ` did not record an unique ID for the device it was played on. There was also one transaction that for some reason recorded the player as having a negative coin balance. However, no real reasons for these issues were able to be fleshed out, and they are at least minor compared to the size of the entire data set. There were, however, two more actionable items that I wanted to call closer attention to.
+
+
+### Client Version 573
+
+The first was that the reading for the subtype of each drop taken had `r nrow(loot.data %>% filter(is.na(subtype))) ` missing values in the entire data set. While this is an extremely small percentage, it does affect the data quality even just a little bit. However, a further inspection of the `r nrow(loot.data %>% filter(is.na(subtype))) ` rows with the missing subtypes shows a clear pattern.
+
+```{r Subtype Missing Values,echo=FALSE}
+grid.table(loot.data %>% filter(is.na(subtype)) %>% select(Date, Time, ClientVersion, subtype))
+
+```
+
+It is clear that all `r nrow(loot.data %>% filter(is.na(subtype))) ` missing subtypes are coming from gamers playing on Client Version 573. Furthermore, there were no other loot drops recorded playing on 573 other than these 13 transactions. All other client versions always recorded a drop as either regular or scavenger. So developers will need to inspect why users on 573 are not able to record the type of drop they are taking in the game.
+
+### The Drop Glitch?
+
+Earlier in this report, it was noted that over 99% of all users in the sample performed 4 drops or less. While many users did progress past that level, one user in particular stood out amongst all the rest. Some users had performed dozens, a few had performed in the hundreds, but then there was one user who performed 7,081 drops in the 3-day sample. 
+
+In the charts below, the left chart is the number of drops performed by all users not including the outlier 7,000 drop player. The chart on the right shows the drops performed by all users, including the 7,000 drop user (called "the anomaly" for short). Notice on the left chart that the majority of users clustered around 1-4 drops with a few trickling up towards 100 and one outlier around 660. However when that same distribution (the points in blue) was looked at compared to the 7,000 drop anomaly (the big red point on the chart), they all kind of cluster together. Even the 660 drop user looks kind of normal by comparison. Clearly this is an indication of some sort of major outlier.
+
+```{r 7000 drop user prep, include=FALSE}
+
+#identify the row with the 7000 transct user
+flag = which(user.transactions$total.drops > 7000)
+
+#All users without the 7000 drop flag
+g1 = ggplot(user.transactions[-flag,], aes(x="", y=total.drops)) + 
+  geom_jitter(alpha=.5, width=.25, color="blue") +
+  scale_y_continuous(breaks = seq(0,700,100)) +
+  labs(title = "Total Drops by User (without Anomaly)", x= "All Users", y="Total Drops Taken") +
+  theme(plot.title = element_text(size=12))
+
+#Two charts: one with the anomaly and out without it, overlayed on top of each other
+g3 = ggplot(user.transactions) + 
+  geom_jitter(data=user.transactions[-flag,], aes(x="", y=total.drops), alpha=.5, width=.25, color="blue") +
+  geom_point(data=user.transactions[flag,], aes(x="", y = total.drops), alpha=.5, size=10, color="red", fill="red" ) +
+  scale_y_continuous(breaks = seq(0,7000,1000)) +
+  labs(title = "Total Drops by User (with Anomaly)", x= "All Users", y="Total Drops Taken") + 
+  theme(plot.title = element_text(size=12))
+```
+
+```{r 7000 drop user charts, echo=FALSE, fig.width=10, message=FALSE, warning=FALSE}
+
+#Turns both charts into a grid
+grid.arrange(g1, g3, nrow=1)
+
+```
+
+At first glance, there does not appear to be any noticeable reason as to why this one user was able to perform so many drops. As far as I can tell, the two most likely reasons would either be:
+
+A) One player has found a glitch in the game that allows him to exploit the loot drop system.
+
+B)  There is an issue with the data where it is actually multiple players (probably thousands of players) accidentally being read as playing on the same device ID.
+
+It seems unlikely that only one person out of over 140,000 users would identify such a huge glitch, and then perhaps made more unlikely that one person would also choose not to share that information with anybody else. For that reason, I would tend to lean in the direction of a data quality issue that may perhaps be causing a bunch of players to be read under the same ID. That may even be somewhat validated upon closer inspection of the anomaly's ID.
+
+```{r Anomaly Chart, echo=FALSE, warning=FALSE, message=FALSE}
+
+#all transactions with the 7000 drop user
+anomaly = loot.data %>% 
+  filter(deviceid == "IAxBQL93bNDJhvSVnuNXLORwAVKimMDi4FtIRt3YI+Q=")
+
+ggplot(anomaly, aes(x=ClientVersion, fill=as.factor(Date))) +
+  geom_histogram(stat="count") +
+  scale_y_continuous(breaks=seq(0,3500,500)) +
+  labs(title= "Breakdown of The Anomaly's Loot Drops by Version and Date", y= "Total Drops", x="Client Version") +
+  scale_fill_discrete(name="Date")
+  
+
+```
+
+The anomaly ID recorded at least one drop on 13 different client versions. Furthermore, we can also see that the ID not only had drops performed on many different clients but that the drops were being performed across all three days in the sample as well. It seems unlikely that one person was playing the game on 13 different clients consistently across three days. That seems like a far more likely explanation that there is some sort of data issue where multiple users are being read onto the same device ID, and I would recommend further examination by the programming team.
+
+***
+
+# Summary
+
+To summarize the findings of this report:
+
+1) There appears to be an issue with the game where it is distributing too many mid-level items on regular loot drops and not enough low-level items. This imbalance is making the scavenger drops look less valuable by comparison. The game developers should examine possible reasons why the regular drops are not performing according to its assigned probabilities.
+
+2) Game users are generally not finding the loot drops to be essential to progression through the game. Two possible reasons for this are that there may be too many free coins dispersed throughout the game that can be collected without loot drops, and the loot drops generally only increase their coin balance by a small percentage and thus users feel it may not be worth their time. 
+
+      + For the former problem, I recommend that developers should look into slightly reducing the number of free coins available in the game to prop up the utility of the loot drop exchange function. 
+  
+      + The latter problem could be attacked in a few ways. Re-configuring the logic in the probabilities on the drops is one way. This could mean intentionally giving out a few more mid and mid-high level drop items at the expense of the lower-valued ones. This might allow users to feel they are getting valuable rewards, even as their coin balance ascends. 
+      
+      + It might also be an option to look to change the onboarding process of the game to try to funnel users towards the loot drop option earlier in the game. If players are trained to check out the loot drop function early when their coin balances are much lower, then the value of their drops will seem larger by comparison (i.e. a 5,000 coin drop means more to a user with 5,000 coins than it does to one with 100,000). By getting this message across early that loot drops could have large impacts on coins, this could subtly remind them to continue using the function throughout their progression later in the game (and perhaps even make them more likely to want to pay for the premium content to help them level up). 
+
+3) All loot drops from the version 573 game are not properly recording drop types, and developers should look into the technical reason as to why.
+
+4) There is a major data quality issue in that it appears very likely that for some reason there are many different users whose loot drop transactions are being routed to the device ID `r user.transactions %>% filter(total.drops>7000) %>% select(deviceid)`. This makes it seem like one player is exploiting the game, but it is most likely just hundreds or thousands of players being mislabeled as one. The developers and data engineers should look to identify possible reasons as to why so many transactions are being routed to this one ID.
